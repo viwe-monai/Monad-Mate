@@ -90,7 +90,7 @@ curl -s $BASE/v1/ai/match-agent/preferences -H "$AUTH"
 # 匹配建议列表
 curl -s $BASE/v1/ai/match-agent/suggestions -H "$AUTH"
 
-# 生成匹配介绍语（走本地 deepseek-r1:32b，约 15s）
+# 生成匹配介绍语（走本地 deepseek-r1:14b，通常 5-8s）
 curl -s -X POST $BASE/v1/ai/match-agent/intro -H "$AUTH" \
   -H "Content-Type: application/json" -d '{}'
 ```

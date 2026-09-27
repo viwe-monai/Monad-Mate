@@ -2,14 +2,13 @@
 LLM & Embedding Service — Monad Mate
 
 AI inference routes to local model services (no cloud keys needed):
-  - Ollama /api/chat (deepseek-r1:32b) for intro / meetup-plan generation
-  - Xinference /v1/embeddings (bge-large-zh-v1.5, 1024-dim) for semantic vectors
+  - Ollama /api/chat (deepseek-r1:14b) for intro / meetup-plan generation
+  - Ollama /v1/embeddings (nomic-embed-text, 768-dim) for semantic vectors
 
 ZeroDB vector search (optional cloud) still goes through AINative when
 AINATIVE_API_KEY is set; falls back gracefully otherwise.
 
 Ollama:  host=127.0.0.1:11434, container=http://host.docker.internal:11434
-Embed:   host=127.0.0.1:9997,  container=http://host.docker.internal:9997
 """
 from __future__ import annotations
 
@@ -25,10 +24,10 @@ _BASE = os.getenv("AINATIVE_API_URL", "https://api.ainative.studio")
 # 172.20.0.1 = Hackathon_network 网关（宿主机服务）；本机 compose environment
 # 新增键注入不可靠，此处默认值即容器内实际值。裸跑时 env 覆盖为 127.0.0.1。
 _OLLAMA_BASE = os.getenv("OLLAMA_BASE_URL", "http://172.20.0.1:11434")
-_OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "deepseek-r1:32b")
-_EMBED_BASE = os.getenv("EMBEDDINGS_BASE_URL", "http://172.20.0.1:9997")
-_EMBED_MODEL = os.getenv("EMBEDDINGS_MODEL", "bge-large-zh-v1.5")
-_EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "1024"))  # bge-large-zh-v1.5
+_OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "deepseek-r1:14b")
+_EMBED_BASE = os.getenv("EMBEDDINGS_BASE_URL", "http://172.20.0.1:11434")
+_EMBED_MODEL = os.getenv("EMBEDDINGS_MODEL", "nomic-embed-text:latest")
+_EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "768"))  # nomic-embed-text
 
 
 def _api_key() -> Optional[str]:
@@ -95,7 +94,7 @@ def generate_match_intro(
 ) -> str:
     """
     Generate a personalised opening message via the local Ollama LLM
-    (deepseek-r1:32b). Falls back to a deterministic template on failure.
+    (deepseek-r1:14b). Falls back to a deterministic template on failure.
     """
     interest_str = ", ".join(shared_interests[:5]) if shared_interests else "similar vibes"
     intent_hint = f" (intent: {requester_intent})" if requester_intent else ""
@@ -166,12 +165,12 @@ def generate_plan_completion(*, system: str, user_prompt: str) -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
-# Embeddings: 1024-dim vectors via local Xinference (bge-large-zh-v1.5)
+# Embeddings: 768-dim vectors via local Ollama (nomic-embed-text)
 # ---------------------------------------------------------------------------
 
 def embed_text(text: str) -> list[float]:
     """
-    Generate a 1024-dim bge-large-zh-v1.5 embedding via the local Xinference
+    Generate a 768-dim nomic-embed-text embedding via the local Ollama
     service (OpenAI-compatible /v1/embeddings).
     Returns a zero vector on failure (safe for cosine similarity — treated as no-match).
     """

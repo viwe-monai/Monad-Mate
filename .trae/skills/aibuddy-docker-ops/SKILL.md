@@ -45,8 +45,10 @@ AiBuddy/Monad Mate 项目的完整 Docker 部署运维知识。
 
 ## 常用命令（在 backend/ 目录执行）
 
+**权限注意（2026-09-08 迁移后）：本机 hua 用户不在 docker 组，所有 docker 命令需走 `sudo`（密码询问用户，勿写入文件）。sudo 无 TTY 时用 `echo <密码> | sudo -S -p '' docker ...`；环境变量传递用 `sudo env DOCKER_BUILDKIT=0 docker build ...`**
+
 ```bash
-cd /home/xzh/Hackathon/AiBuddy/backend
+cd /home/hua/project/Hackathon/Monad-Mate/backend
 
 docker compose up -d        # 启动/应用配置变更
 docker compose stop         # 停止（保留容器）
@@ -63,16 +65,16 @@ docker logs -f Hackathon_api     # 看后端日志（landing/worker/beat/db 同�
 
 ```bash
 # 后端镜像（根 Dockerfile，context 是项目根）
-DOCKER_BUILDKIT=0 docker build -t hackathon-aibuddy:latest /home/xzh/Hackathon/AiBuddy
+DOCKER_BUILDKIT=0 docker build -t hackathon-aibuddy:latest /home/hua/project/Hackathon/Monad-Mate
 
 # 前端镜像
-DOCKER_BUILDKIT=0 docker build -t hackathon-landing:latest /home/xzh/Hackathon/AiBuddy/landing
+DOCKER_BUILDKIT=0 docker build -t hackathon-landing:latest /home/hua/project/Hackathon/Monad-Mate/landing
 
 # 应用界面镜像（app/，登录/匹配/打卡）
-DOCKER_BUILDKIT=0 docker build -t hackathon-app:latest /home/xzh/Hackathon/AiBuddy/app
+DOCKER_BUILDKIT=0 docker build -t hackathon-app:latest /home/hua/project/Hackathon/Monad-Mate/app
 
 # 应用重启
-cd /home/xzh/Hackathon/AiBuddy/backend && docker compose up -d
+cd /home/hua/project/Hackathon/Monad-Mate/backend && docker compose up -d
 ```
 
 注意：`docker compose up -d --build` 会走 buildx 构建并因网络失败，所以先手动 build 再 up。
@@ -121,25 +123,35 @@ docker exec Hackathon_api python scripts/demo_seed.py --base-url http://localhos
 | 原生 SQL 改 sm_ 表枚举 | DB 枚举标签是 Python 枚举名大写（'ACTIVE'/'REFUNDED'），API 返回的是小写值；psql 里必须用大写 |
 | RPC `get_logs` 全量扫描 413 / `Archive error` | Monad 公共节点限制。改用 getStake 视图函数按 key 查询，或 receipt 查询加重试 |
 
-## 本地模型服务（LLM + embeddings，2026-09-05 接入）
+## 本地模型服务（LLM + embeddings，2026-09-08 服务器迁移后更新）
+
+本机 Ollama 监听 `*:11434`（宿主机 127.0.0.1:11434），可用模型：
+
+| 模型 | 用途 |
+|---|---|
+| deepseek-r1:14b | LLM 文本生成：匹配介绍 / meetup 计划（generate_match_intro / generate_plan_completion，经 _ollama_chat helper） |
+| nomic-embed-text:latest | 语义向量检索（/v1/embeddings，OpenAI 兼容，**768 维**） |
+| qwen2.5vl:7b | 多模态视觉模型（当前代码未接入，备用） |
 
 | 服务 | 地址（容器内视角） | 用途 |
 |---|---|---|
-| Ollama deepseek-r1:32b | http://172.20.0.1:11434（宿主机 127.0.0.1:11434） | 匹配介绍生成、meetup 计划生成（generate_match_intro / generate_plan_completion，经 _ollama_chat helper） |
-| Xinference bge-large-zh-v1.5 | http://172.20.0.1:9997（宿主机 127.0.0.1:9997） | 语义向量（/v1/embeddings，OpenAI 兼容，1024 维） |
+| Ollama（LLM + embeddings 同端口） | http://172.20.0.1:11434（宿主机 127.0.0.1:11434） | /api/chat 生成 + /v1/embeddings 向量 |
 
+- 迁移要点：旧服务器的 Xinference bge-large-zh-v1.5（端口 9997，1024 维）已废弃；embeddings 改走 Ollama 同端口 11434 的 `/v1/embeddings`（OpenAI 兼容格式不变，代码无需改调用方式）
+- 维度变化 1024 → 768：preference_memory_service 存 JSON 列无需迁移，cosine 对维度不等安全返回 0（旧向量自动失效视为无匹配）；若要恢复语义匹配，需对新数据重新 embedding，或演示库直接清空重建
 - 172.20.0.1 = Hackathon_network 网关（容器访问宿主机服务）；网关变了查：`docker network inspect Hackathon_network | grep Gateway`
-- 默认值内建在 backend/app/core/config.py 和 ainative_service.py（因为本环境 compose 的 environment 新增键注入不可靠，见下）
-- embeddings 维度 1024（bge-large-zh-v1.5），preference_memory_service 存 JSON 列无需迁移；cosine 对维度不等安全返回 0
-- 两个 .env 分工：根 `.env` = 本地服务全局配置（OLLAMA_*/EMBEDDINGS_* 等）；`backend/.env` = 后端合约配置（Monad 合约/私钥/阈值），compose 实际加载的是 backend/.env（env_file: .env）
-- LLM 推理耗时：deepseek-r1:32b 单次生成约 15s（intro）/更久（plan），超时设 180s/300s
+- 配置三处同步改（本次迁移已全部更新）：`backend/docker-compose.yml`（worker/beat 的 environment）、`backend/app/core/config.py` 与 `ainative_service.py` 内建默认值、根 `.env`。compose 的 environment 对**已存在的键**注入可靠，新增键不可靠
+- LLM 推理耗时：deepseek-r1:14b 比 32b 快（单次生成约 5-8s），超时保持 180s/300s 不变即可
 - 中断恢复注意：曾发生过编辑被部分回退（generate_match_intro/generate_plan_completion 变回 AINative 旧版），改完代码后建议 grep 确认关键改动还在再构建
 
 | 症状 | 原因/解决 |
 |---|---|
+| embeddings 返回 404 / model not found | 模型名不对，用 `ollama list` 确认（当前 nomic-embed-text:latest）；embedding 走 /v1/embeddings 不是 /api/embeddings |
+| 容器内连不上 11434 | Ollama 需监听 0.0.0.0（`OLLAMA_HOST=0.0.0.0`），且网关 IP 变了用 `docker network inspect Hackathon_network | grep Gateway` 重查 |
 | compose env_file 用列表形式不生效 | 本环境只支持单字符串 `env_file: .env`，列表被静默忽略 |
 | compose environment 新增键不进容器（老键正常） | 本环境已知怪癖，force-recreate/删容器重建均无效；新增配置只能写进代码默认值（config.py）或 backend/.env |
 | host.docker.internal 不解析 | extra_hosts 在本环境无效；用网关 IP 172.20.0.1 直连 |
+| 旧偏好向量匹配全为 0 | 1024→768 维度不等，cosine 安全返回 0 属预期；重建数据或重新 embedding |
 
 ## 技术栈备忘
 

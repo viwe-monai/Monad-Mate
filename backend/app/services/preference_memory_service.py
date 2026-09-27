@@ -161,8 +161,8 @@ class PreferenceMemoryService:
 
     def compute_embedding(self, prefs: dict) -> list[float]:
         """
-        Compute a normalised 1024-dim semantic embedding via the local
-        embeddings service (bge-large-zh-v1.5).
+        Compute a normalised 768-dim semantic embedding via the local
+        Ollama embeddings service (nomic-embed-text).
         """
         vec = embed_preferences(
             interests=prefs.get("interests") or [],
